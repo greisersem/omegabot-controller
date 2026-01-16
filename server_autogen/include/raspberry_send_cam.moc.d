@@ -1,5 +1,5 @@
-/home/vboxuser/Desktop/omegabot-controller/build/server_autogen/include/raspberry_send_cam.moc: /home/vboxuser/Desktop/omegabot-controller/raspberry_send_cam.cpp \
-  /home/vboxuser/Desktop/omegabot-controller/build/server_autogen/moc_predefs.h \
+/home/vboxuser/Desktop/omegabot-controller/server_autogen/include/raspberry_send_cam.moc: /home/vboxuser/Desktop/omegabot-controller/raspberry_send_cam.cpp \
+  /home/vboxuser/Desktop/omegabot-controller/server_autogen/moc_predefs.h \
   /usr/include/arpa/inet.h \
   /usr/include/asm-generic/bitsperlong.h \
   /usr/include/asm-generic/errno-base.h \

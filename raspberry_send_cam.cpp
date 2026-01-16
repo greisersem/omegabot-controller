@@ -20,7 +20,7 @@
 #include <vector>
 #include <csignal>
 
-#define SERVER_IP       "192.168.1.46"
+#define SERVER_IP       "192.168.0.104"
 #define SERVER_PORT     12345
 #define VIDEO_PORT      12346
 #define LOGS_PORT       12347
@@ -150,14 +150,28 @@ private:
     cv::VideoCapture cap;
 
     void updateFrame() {
-        if(!cap.isOpened()) return;
+        if (!cap.isOpened()) return;
+
         cv::Mat frame;
         cap >> frame;
-        if(frame.empty()) return;
-        cv::rotate(frame, frame, cv::ROTATE_180);
-        QImage img(frame.data, frame.cols, frame.rows, frame.step, QImage::Format_RGB888);
-        img = img.rgbSwapped();
-        video_label->setPixmap(QPixmap::fromImage(img).scaled(video_label->size(), Qt::KeepAspectRatio));
+        if (frame.empty()) return;
+
+        // OpenCV = BGR
+        QImage img(
+            frame.data,
+            frame.cols,
+            frame.rows,
+            frame.step,
+            QImage::Format_BGR888
+        );
+
+        video_label->setPixmap(
+            QPixmap::fromImage(img).scaled(
+                video_label->size(),
+                Qt::KeepAspectRatio,
+                Qt::SmoothTransformation
+            )
+        );
     }
 
     void sendCommand(char cmd) {

@@ -1,5 +1,0 @@
-/home/vboxuser/Desktop/omegabot-controller/build/CMakeFiles/server.dir
-/home/vboxuser/Desktop/omegabot-controller/build/CMakeFiles/edit_cache.dir
-/home/vboxuser/Desktop/omegabot-controller/build/CMakeFiles/rebuild_cache.dir
-/home/vboxuser/Desktop/omegabot-controller/build/CMakeFiles/server_autogen_timestamp_deps.dir
-/home/vboxuser/Desktop/omegabot-controller/build/CMakeFiles/server_autogen.dir
