@@ -13,7 +13,7 @@
 #define HEARTBEAT_PORT  12348  // Порт для отслеживания соединения
 
 const char* UART_DEVICE = "/dev/ttyACM0";  // UART устройство
-const char* SERVER_IP = "192.168.221.235";  // IP адрес ноутбука
+const char* SERVER_IP = "192.168.0.105";  // IP адрес ноутбука
 //const char* SERVER_IP = "192.168.100.120";  // IP WSL
 // const char* SERVER_IP = "192.168.1.55";
 
@@ -111,13 +111,11 @@ void videoStreamSender() {
 
     // Создание элемента пайплайна GStreamer
     std::string pipelineStr =
-    "libcamerasrc ! "
-    "video/x-raw, width=320, height=320, framerate=10/1 ! "
-    "videoconvert ! queue ! "
-    "x264enc tune=zerolatency bitrate=350 speed-preset=superfast ! "
-    "rtph264pay ! "
-    "udpsink host=" + std::string(SERVER_IP) + " port=" + std::to_string(VIDEO_PORT);
-
+"v4l2src ! "
+"videoconvert ! "
+"x264enc tune=zerolatency bitrate=500 speed-preset=ultrafast ! "
+"rtph264pay ! "
+"udpsink host=" + std::string(SERVER_IP) + " port=" + std::to_string(VIDEO_PORT);
     GError* error = nullptr;
     GstElement* pipeline = gst_parse_launch(pipelineStr.c_str(), &error);
 
