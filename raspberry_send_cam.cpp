@@ -108,9 +108,14 @@ public:
 
         // OpenCV VideoCapture через GStreamer
         std::string gst_pipeline =
-            "udpsrc port=" + std::to_string(VIDEO_PORT) + " ! "
-            "application/x-rtp, encoding-name=H264 ! "
-            "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! appsink";
+            "udpsrc port=" + std::to_string(VIDEO_PORT) + "caps=\"application/x-rtp, media=video, "
+            "encoding-name=H264, payload=96, clock-rate=90000\" ! "
+            "rtpjitterbuffer latency=20 drop-on-late=true ! "
+            "rtph264depay ! "
+            "h264parse ! "
+            "avdec_h264 ! "
+            "videoconvert ! "
+            "appsink sync=false max-buffers=1 drop=true";
         cap.open(gst_pipeline, cv::CAP_GSTREAMER);
         if(!cap.isOpened())
             log_widget->append("Error opening video stream!");
