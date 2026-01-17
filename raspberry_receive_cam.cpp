@@ -13,7 +13,7 @@
 #define HEARTBEAT_PORT  12348  // Порт для отслеживания соединения
 
 const char* UART_DEVICE = "/dev/ttyACM0";  // UART устройство
-const char* SERVER_IP = "192.168.0.105";  // IP адрес ноутбука
+const char* SERVER_IP = "192.168.31.34";  // IP адрес ноутбука
 //const char* SERVER_IP = "192.168.100.120";  // IP WSL
 // const char* SERVER_IP = "192.168.1.55";
 

@@ -20,7 +20,7 @@
 #include <vector>
 #include <csignal>
 
-#define SERVER_IP       "192.168.1.46"
+#define SERVER_IP       "192.168.31.172"
 #define SERVER_PORT     12345
 #define VIDEO_PORT      12346
 #define LOGS_PORT       12347
