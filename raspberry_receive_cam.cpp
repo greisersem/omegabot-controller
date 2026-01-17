@@ -232,17 +232,23 @@ int main() {
     std::thread heartbeatThread(monitor_heartbeat);                 // Поток для мониторинга сердцебиения
 
     // Основной цикл: приём команд и управление UART
+    bool e_sent = false;
+
     while (true) {
         if (connection_lost) {
-            std::cout << "Connection is lost" << std::endl;
-            serWriteByte(uart, 'e');
-            std::this_thread::sleep_for(std::chrono::seconds(1)); // Исключаем спам
+            if (!e_sent) {
+                std::cout << "Connection is lost" << std::endl;
+                serWriteByte(uart, 'e');   // отправляем ОДИН раз
+                e_sent = true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
 
         if (connection_restored) {
-            serWriteByte(uart, 's');
             connection_restored = false;
+            connection_lost = false;
+            e_sent = false;              
             continue;
         }
 

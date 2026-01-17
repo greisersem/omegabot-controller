@@ -269,16 +269,16 @@ void Driver::connection_lost_case()
     stop_motors();
     sound_signal(100);
 
-    int delay_time = 100;     // milliseconds
-    int drive_time = 1500;
-    int delay_counter = 0;
-    int counter_limit = drive_time / delay_time;
+    const int delay_time = 10;     
+    const int drive_time = 2000;   
+    int elapsed = 0;
 
-    while ((read_command() == '0' || read_command() == 'e') && delay_counter < counter_limit) {
+    while (elapsed < drive_time) {
         if (STOP_COMMAND) break;
-        delay_counter++;
-        set_motors(-150, -150);
+
+        set_motors(-150, -150);    
         delay(delay_time);
+        elapsed += delay_time;
     }
 
     stop_motors();
