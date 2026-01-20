@@ -115,7 +115,7 @@ void video_stream_sender() {
         "rtph264pay config-interval=1 pt=96 !" 
         "udpsink host=" + std::string(SERVER_IP) + " port=" + std::to_string(VIDEO_PORT);
     GError* error = nullptr;
-    GstElement* pipeline = gst_parse_launch(pipeline_str, &error);
+    GstElement* pipeline = gst_parse_launch(pipeline_str.c_str(), &error);
 
     if (!pipeline) {
         std::cerr << "Error creating pipeline with GStreamer: " << (error ? error->message : "неизвестная ошибка") << std::endl;
@@ -172,6 +172,7 @@ int main() {
         return -1;
     }
 
+    char uart_device[] = UART_DEVICE;
     int uart = serOpen(UART_DEVICE, 9600, 0);
     if (uart < 0) {
         std::cerr << "UART opening error." << std::endl;
