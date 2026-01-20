@@ -12,10 +12,9 @@
 #define LOGS_PORT       12347  // Порт для отправки логов
 #define HEARTBEAT_PORT  12348  // Порт для отслеживания соединения
 
-const std::string UART_DEVICE = "/dev/ttyACM0";  // UART устройство
-const std::string SERVER_IP = "192.168.0.104";  // IP адрес ноутбука
-//const char* SERVER_IP = "192.168.100.120";  // IP WSL
-// const char* SERVER_IP = "192.168.1.55";
+#define UART_DEVICE "/dev/ttyACM0";   // UART устройство
+#define SERVER_IP   "192.168.0.104";  // IP адрес ноутбука дома
+// #define SERVER_IP "192.168.31.34";    // IP вдрес ноутбука в аудитории
 
 volatile bool logs_running = true;
 volatile bool heartbeat_running = true;
@@ -44,7 +43,6 @@ void monitor_heartbeat()
         return;
     }
 
-    // Set the socket to non-blocking mode
     int flags = fcntl(heartbeat_sock, F_GETFL, 0);
 
     if (flags < 0) {
@@ -60,24 +58,23 @@ void monitor_heartbeat()
     }
 
     char buffer[2] = {0};
-    sockaddr_in clientAddr{};
-    socklen_t clientAddrLen = sizeof(clientAddr);
+    sockaddr_in client_addr{};
+    socklen_t client_addr_len = sizeof(client_addr);
 
-    auto lastHeartbeat = std::chrono::steady_clock::now();
-    bool wasConnectionLost = false;
+    auto last_heartbeat = std::chrono::steady_clock::now();
+    bool was_connection_lost = false;
 
     std::cout << "Entering heartbeat loop..." << std::endl;
 
     while (heartbeat_running) {
-        int received = recvfrom(heartbeat_sock, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&clientAddr, &clientAddrLen);
+        int received = recvfrom(heartbeat_sock, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&client_addr, &client_addr_len);
         if (received > 0) {
             buffer[received] = '\0';
             if (buffer[0] == '1') {
-                // std::cout << "Heartbeat received." << std::endl;
-                lastHeartbeat = std::chrono::steady_clock::now();
-                if (wasConnectionLost) {
+                last_heartbeat = std::chrono::steady_clock::now();
+                if (was_connection_lost) {
                     std::cout << "Connection restored." << std::endl;
-                    wasConnectionLost = false;
+                    was_connection_lost = false;
                     connection_lost = false;
                     connection_restored = true;
                 }
@@ -89,12 +86,12 @@ void monitor_heartbeat()
         }
 
         auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastHeartbeat).count();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_heartbeat).count();
 
         if (elapsed >= CRITICAL_TIMEOUT.count()) {
-            if (!wasConnectionLost) {
+            if (!was_connection_lost) {
                 std::cout << "Connection lost detected." << std::endl;
-                wasConnectionLost = true;
+                was_connection_lost = true;
                 connection_lost = true;
             }
         }
@@ -105,14 +102,20 @@ void monitor_heartbeat()
     close(heartbeat_sock);
 }
 
-void videoStreamSender() {
-    // Инициализация GStreamer
+
+void video_stream_sender() {
     gst_init(nullptr, nullptr);
 
-    // Создание элемента пайплайна GStreamer
-    std::string pipelineStr = "v4l2src device=/dev/video0 ! image/jpeg, width=640, height=480, framerate=30/1 ! jpegparse ! avdec_mjpeg ! videoconvert ! x264enc tune=zerolatency bitrate=1000 speed-preset=ultrafast ! rtph264pay config-interval=1 pt=96 ! udpsink host=" + SERVER_IP + " port=12346";
+    std::string pipeline = 
+        "v4l2src device=/dev/video0 ! "
+        "image/jpeg, width=640, height=480, "
+        "framerate=30/1 ! jpegparse ! avdec_mjpeg ! "
+        "videoconvert ! x264enc tune=zerolatency bitrate=1000 "
+        "speed-preset=ultrafast ! "
+        "rtph264pay config-interval=1 pt=96 !" 
+        "udpsink host=" + SERVER_IP + " port=" + std::to_string(VIDEO_PORT);
     GError* error = nullptr;
-    GstElement* pipeline = gst_parse_launch(pipelineStr.c_str(), &error);
+    GstElement* pipeline = gst_parse_launch(pipeline, &error);
 
     if (!pipeline) {
         std::cerr << "Error creating pipeline with GStreamer: " << (error ? error->message : "неизвестная ошибка") << std::endl;
@@ -120,7 +123,6 @@ void videoStreamSender() {
         return;
     }
 
-    // Запуск пайплайна
     GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
     if (ret == GST_STATE_CHANGE_FAILURE) {
         std::cerr << "Error opening pipline with GStreamer!" << std::endl;
@@ -128,51 +130,48 @@ void videoStreamSender() {
         return;
     }
 
-    // Ожидание завершения (или можно сделать основной цикл)
     std::cout << "Video stream is sending. Press Ctrl+C to exit." << std::endl;
     GstBus* bus = gst_element_get_bus(pipeline);
     gst_bus_timed_pop_filtered(bus, GST_CLOCK_TIME_NONE, static_cast<GstMessageType>(GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
 
-    // Остановка пайплайна
     gst_element_set_state(pipeline, GST_STATE_NULL);
     gst_object_unref(bus);
     gst_object_unref(pipeline);
 }
 
-void sendLogs(int uart, const std::string& server_ip) {
+
+void send_logs(int uart, const std::string& server_ip) {
     int log_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (log_sock < 0) {
         std::cerr << "Error binding log socket." << std::endl;
         return;
     }
 
-    sockaddr_in logAddr;
-    logAddr.sin_family = AF_INET;
-    logAddr.sin_port = htons(LOGS_PORT);
-    inet_pton(AF_INET, server_ip.c_str(), &logAddr.sin_addr);
+    sockaddr_in log_addr;
+    log_addr.sin_family = AF_INET;
+    log_addr.sin_port = htons(LOGS_PORT);
+    inet_pton(AF_INET, server_ip.c_str(), &log_addr.sin_addr);
 
     while (logs_running) {
         char uart_buffer[256] = {0};
-        int bytesRead = serRead(uart, uart_buffer, sizeof(uart_buffer) - 1); // Чтение строки от Arduino
-        if (bytesRead > 0) {
-            uart_buffer[bytesRead] = '\0'; // Добавляем терминальный символ
-            sendto(log_sock, uart_buffer, strlen(uart_buffer), 0, (sockaddr*)&logAddr, sizeof(logAddr));
+        int bytes_read = serRead(uart, uart_buffer, sizeof(uart_buffer) - 1);
+        if (bytes_read > 0) {
+            uart_buffer[bytes_read] = '\0';
+            sendto(log_sock, uart_buffer, strlen(uart_buffer), 0, (sockaddr*)&log_addr, sizeof(log_addr));
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Задержка для снижения нагрузки (100 мс)
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     close(log_sock);
 }
 
 int main() {
-    // Инициализация pigpio
     if (gpioInitialise() < 0) {
         std::cerr << "Pigpio init error." << std::endl;
         return -1;
     }
 
-    // Открытие UART
     int uart = serOpen(UART_DEVICE, 9600, 0);
     if (uart < 0) {
         std::cerr << "UART opening error." << std::endl;
@@ -180,7 +179,6 @@ int main() {
         return -1;
     }
 
-    // Настройка сокета для приёма данных по UDP
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock < 0) {
         std::cerr << "Error creating socket." << std::endl;
@@ -202,7 +200,6 @@ int main() {
         return -1;
     }
 
-    // Устанавливаем сокет в неблокирующий режим
     int flags = fcntl(sock, F_GETFL, 0);
     if (flags < 0) {
         std::cerr << "Error getting socket flags." << std::endl;
@@ -218,19 +215,17 @@ int main() {
         return -1;
     }
 
-    // Запуск потоков
-    std::thread logThread(sendLogs, uart, SERVER_IP);               // Поток для отправки логов
-    std::thread videoThread(videoStreamSender);                     // Поток для видеопотока
-    std::thread heartbeatThread(monitor_heartbeat);                 // Поток для мониторинга сердцебиения
+    std::thread logThread(send_logs, uart, SERVER_IP);
+    std::thread videoThread(video_stream_sender);
+    std::thread heartbeatThread(monitor_heartbeat);
 
-    // Основной цикл: приём команд и управление UART
     bool e_sent = false;
 
     while (true) {
         if (connection_lost) {
             if (!e_sent) {
                 std::cout << "Connection is lost" << std::endl;
-                serWriteByte(uart, 'e');   // отправляем ОДИН раз
+                serWriteByte(uart, 'e');
                 e_sent = true;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -245,10 +240,10 @@ int main() {
         }
 
         char buffer[1];
-        sockaddr_in clientAddr;
-        socklen_t addrLen = sizeof(clientAddr);
+        sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
 
-        int received = recvfrom(sock, buffer, sizeof(buffer), 0, (sockaddr*)&clientAddr, &addrLen);
+        int received = recvfrom(sock, buffer, sizeof(buffer), 0, (sockaddr*)&client_addr, &addr_len);
         if (received > 0) {
             std::cout << "Received command: " << buffer[0] << std::endl;
             serWriteByte(uart, buffer[0]);
@@ -257,14 +252,12 @@ int main() {
         }
     }
 
-    // Ожидание завершения потоков
     logs_running = false;
     heartbeat_running = false;
     heartbeatThread.join();
     logThread.join();
     videoThread.join();
 
-    // Завершение работы
     close(sock);
     serClose(uart);
     gpioTerminate();
