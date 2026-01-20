@@ -12,9 +12,9 @@
 #define LOGS_PORT       12347  // Порт для отправки логов
 #define HEARTBEAT_PORT  12348  // Порт для отслеживания соединения
 
-#define UART_DEVICE "/dev/ttyACM0";   // UART устройство
-#define SERVER_IP   "192.168.0.104";  // IP адрес ноутбука дома
-// #define SERVER_IP "192.168.31.34";    // IP вдрес ноутбука в аудитории
+#define UART_DEVICE "/dev/ttyACM0"   // UART устройство
+#define SERVER_IP   "192.168.0.104"  // IP адрес ноутбука дома
+// #define SERVER_IP "192.168.31.34"    // IP вдрес ноутбука в аудитории
 
 volatile bool logs_running = true;
 volatile bool heartbeat_running = true;
@@ -106,16 +106,16 @@ void monitor_heartbeat()
 void video_stream_sender() {
     gst_init(nullptr, nullptr);
 
-    std::string pipeline = 
+    std::string pipeline_str = 
         "v4l2src device=/dev/video0 ! "
         "image/jpeg, width=640, height=480, "
         "framerate=30/1 ! jpegparse ! avdec_mjpeg ! "
         "videoconvert ! x264enc tune=zerolatency bitrate=1000 "
         "speed-preset=ultrafast ! "
         "rtph264pay config-interval=1 pt=96 !" 
-        "udpsink host=" + SERVER_IP + " port=" + std::to_string(VIDEO_PORT);
+        "udpsink host=" + std::string(SERVER_IP) + " port=" + std::to_string(VIDEO_PORT);
     GError* error = nullptr;
-    GstElement* pipeline = gst_parse_launch(pipeline, &error);
+    GstElement* pipeline = gst_parse_launch(pipeline_str.c_str(), &error);
 
     if (!pipeline) {
         std::cerr << "Error creating pipeline with GStreamer: " << (error ? error->message : "неизвестная ошибка") << std::endl;
@@ -172,7 +172,8 @@ int main() {
         return -1;
     }
 
-    int uart = serOpen(UART_DEVICE, 9600, 0);
+    char uart_device[] = UART_DEVICE;
+    int uart = serOpen(uart_device, 9600, 0);
     if (uart < 0) {
         std::cerr << "UART opening error." << std::endl;
         gpioTerminate();
