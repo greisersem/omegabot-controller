@@ -1,26 +1,28 @@
-cmake_minimum_required(VERSION 3.10)
-
-project(omegabot_controller
-    VERSION 0.1
-    LANGUAGES CXX
-)
+cmake_minimum_required(VERSION 3.16)
+project(omegabot_controller)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
 
-find_package(Qt5 REQUIRED COMPONENTS Widgets)
+find_package(Qt5 COMPONENTS Widgets Core Gui REQUIRED)
 
-find_package(OpenCV REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(OPENCV4 REQUIRED opencv4)
 
-add_executable(${PROJECT_NAME}
-    src/main.cpp
-)
+message(STATUS "OpenCV version: ${OPENCV4_VERSION}")
+message(STATUS "OpenCV include dirs: ${OPENCV4_INCLUDE_DIRS}")
+message(STATUS "OpenCV libs: ${OPENCV4_LIBRARIES}")
 
-target_include_directories(${PROJECT_NAME} PRIVATE
-    include
-)
+include_directories(${OPENCV4_INCLUDE_DIRS})
+link_directories(${OPENCV4_LIBRARY_DIRS})
 
-target_link_libraries(${PROJECT_NAME} PRIVATE
+add_executable(operator operator.cpp)
+
+target_link_libraries(operator
+    ${OPENCV4_LIBRARIES}
     Qt5::Widgets
-    ${OpenCV_LIBS}
+    Qt5::Core
+    Qt5::Gui
 )
