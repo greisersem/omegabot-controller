@@ -24,8 +24,8 @@
 #include <csignal>
 #include <cstring>
 
-#define RASPBERRY_IP "192.168.0.103"  // IP raspberry дома
-// #define RASPBERRY_IP "192.168.31.34"  // IP raspberry в аудитории
+#define SERVER_IP       "192.168.0.103"  // IP raspberry 
+// #define SERVER_IP       "192.168.31.34"  // IP in unversity
 #define SERVER_PORT     12345
 #define VIDEO_PORT      12346
 #define LOGS_PORT       12347
@@ -37,7 +37,6 @@ std::atomic<bool> do_not_stop(false);
 
 int command_sock = -1;
 
-// --- Поток heartbeat ---
 void send_heartbeat() {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) return;
@@ -45,7 +44,7 @@ void send_heartbeat() {
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(HEARTBEAT_PORT);
-    inet_pton(AF_INET, RASPBERRY_IP, &addr.sin_addr);
+    inet_pton(AF_INET, SERVER_IP, &addr.sin_addr);
 
     while (running) {
         const char* msg = "1";
@@ -56,7 +55,7 @@ void send_heartbeat() {
     close(sock);
 }
 
-// --- Поток логов ---
+
 void receive_logs(QTextEdit* log_widget) {
     if (!log_widget) return;
 
@@ -98,7 +97,7 @@ void receive_logs(QTextEdit* log_widget) {
     close(sock);
 }
 
-// --- Главный класс окна ---
+
 class ControllerWindow : public QWidget {
     Q_OBJECT
 public:
@@ -119,15 +118,56 @@ public:
         layout->addWidget(log_widget);
         setLayout(layout);
 
-        // --- Вывод версии OpenCV ---
-        log_widget->append(QString("[INFO] OpenCV version: %1").arg(CV_VERSION));
+        timer = new QTimer(this);
+        connect(timer, &QTimer::timeout, this, &ControllerWindow::updateFrame);
+        timer->start(33);
 
-        // --- Проверяем поддержку GStreamer в сборке ---
-        std::string build_info = cv::getBuildInformation();
-        bool gst_support = (build_info.find("GStreamer:                    YES") != std::string::npos);
-        log_widget->append(QString("[INFO] GStreamer support: %1").arg(gst_support ? "YES" : "NO"));
+        startVideoOpenThread();
+    }
 
-        // --- Пытаемся открыть UDP H264 поток ---
+    ~ControllerWindow() override {
+        video_ready = false;
+        if (videoOpenThread.joinable()) videoOpenThread.join();
+    }
+
+    QTextEdit* logs() const { return log_widget; }
+
+protected:
+    void keyPressEvent(QKeyEvent* event) override {
+        char command = 0;
+        switch (event->key()) {
+            case Qt::Key_W: command = '1'; break;
+            case Qt::Key_S: command = '2'; break;
+            case Qt::Key_D: command = '3'; break;
+            case Qt::Key_A: command = '4'; break;
+            case Qt::Key_Y: command = 'y'; do_not_stop = true; break;
+            case Qt::Key_O: command = 'o'; do_not_stop = true; break;
+            case Qt::Key_Space: command = 's'; break;
+            case Qt::Key_1: command = 'f'; do_not_stop = true; break;
+            case Qt::Key_Up: command = '5'; break;
+            case Qt::Key_Down: command = '6'; break;
+            case Qt::Key_Left: command = '7'; break;
+            case Qt::Key_Right: command = '8'; break;
+            case Qt::Key_Escape: running = false; running_logs = false; break;
+        }
+        if (command && command_sock != -1) sendCommand(command);
+    }
+
+    void keyReleaseEvent(QKeyEvent* /*event*/) override {
+        if (do_not_stop) { do_not_stop = false; return; }
+        if (command_sock != -1) sendCommand('s');
+    }
+
+private:
+    QLabel* video_label = nullptr;
+    QTextEdit* log_widget = nullptr;
+    QTimer* timer = nullptr;
+
+    cv::VideoCapture cap;
+    std::atomic<bool> video_ready{false};
+    std::thread videoOpenThread;
+
+    void startVideoOpenThread() {
         const std::string gst_pipeline =
             "udpsrc port=12346 caps=application/x-rtp,media=video,encoding-name=H264,payload=96 "
             "! rtph264depay "
@@ -135,53 +175,27 @@ public:
             "! videoconvert "
             "! appsink sync=false";
 
-        log_widget->append("[INFO] Trying to open UDP H264 stream...");
-        if (!cap.open(gst_pipeline, cv::CAP_GSTREAMER)) {
-            video_ready = false;
-            log_widget->append("[ERROR] Failed to open UDP H264 stream!");
-            log_widget->append("[INFO] Possible reasons:");
-            log_widget->append("  1) OpenCV built without GStreamer support");
-            log_widget->append("  2) Missing GStreamer plugins (rtph264depay, avdec_h264)");
-            log_widget->append("  3) Wrong port/IP or firewall blocks the stream");
-            video_label->setText("Video not available");
-        } else {
-            video_ready = true;
-            log_widget->append("[OK] Video stream opened successfully.");
-        }
+        videoOpenThread = std::thread([this, gst_pipeline]() {
+            bool ok = cap.open(gst_pipeline, cv::CAP_GSTREAMER);
 
-        // --- Таймер обновления кадров ---
-        timer = new QTimer(this);
-        connect(timer, &QTimer::timeout, this, &ControllerWindow::updateFrame);
-        timer->start(33);
+            video_ready = ok;
 
-        // --- Таймер отправки команд ---
-        commandTimer = new QTimer(this);
-        connect(commandTimer, &QTimer::timeout, [this]() {
-            if (command_sock != -1) sendCommand(currentCommand);
+            QMetaObject::invokeMethod(
+                this,
+                [this, ok]() {
+                    if (!ok) {
+                        log_widget->append("Error opening video stream! (cap.open blocked/failed)");
+                        video_label->setText("Video not available");
+                    } else {
+                        log_widget->append("Video stream opened");
+                        video_label->setText("");
+                    }
+                },
+                Qt::QueuedConnection
+            );
         });
-        commandTimer->start(50);
     }
 
-    ~ControllerWindow() override {
-        video_ready = false;
-        if (cap.isOpened()) cap.release();
-    }
-
-    QTextEdit* logs() const { return log_widget; }
-
-protected:
-    void keyPressEvent(QKeyEvent* event) override { /* оставляем как есть */ }
-    void keyReleaseEvent(QKeyEvent* /*event*/) override { /* оставляем как есть */ }
-
-private:
-    QLabel* video_label = nullptr;
-    QTextEdit* log_widget = nullptr;
-    QTimer* timer = nullptr;
-    QTimer* commandTimer = nullptr;
-
-    cv::VideoCapture cap;
-    std::atomic<bool> video_ready{false};
-    char currentCommand = 's';
 
     void updateFrame() {
         if (!video_ready.load()) return;
@@ -192,12 +206,23 @@ private:
         if (frame.empty()) return;
 
         QImage img(frame.data, frame.cols, frame.rows, frame.step, QImage::Format_BGR888);
-        video_label->setPixmap(QPixmap::fromImage(img).scaled(video_label->size(),
-                                                              Qt::KeepAspectRatio,
-                                                              Qt::SmoothTransformation));
+
+        video_label->setPixmap(
+            QPixmap::fromImage(img).scaled(
+                video_label->size(),
+                Qt::KeepAspectRatio,
+                Qt::SmoothTransformation
+            )
+        );
     }
 
-    void sendCommand(char cmd) { /* оставляем как есть */ }
+    void sendCommand(char cmd) {
+        sockaddr_in server{};
+        server.sin_family = AF_INET;
+        server.sin_port = htons(SERVER_PORT);
+        inet_pton(AF_INET, SERVER_IP, &server.sin_addr);
+        sendto(command_sock, &cmd, 1, 0, (sockaddr*)&server, sizeof(server));
+    }
 };
 
 
@@ -213,6 +238,7 @@ int main(int argc, char* argv[]) {
     window.show();
 
     std::thread heartbeatThread(send_heartbeat);
+
     std::thread logThread(receive_logs, window.logs());
 
     int ret = app.exec();
