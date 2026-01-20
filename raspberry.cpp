@@ -173,7 +173,7 @@ int main() {
     }
 
     char uart_device[] = UART_DEVICE;
-    int uart = serOpen(UART_DEVICE, 9600, 0);
+    int uart = serOpen(uart_device, 9600, 0);
     if (uart < 0) {
         std::cerr << "UART opening error." << std::endl;
         gpioTerminate();
