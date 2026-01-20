@@ -12,8 +12,8 @@
 #define LOGS_PORT       12347  // Порт для отправки логов
 #define HEARTBEAT_PORT  12348  // Порт для отслеживания соединения
 
-const char* UART_DEVICE = "/dev/ttyACM0";  // UART устройство
-const char* SERVER_IP = "192.168.31.34";  // IP адрес ноутбука
+const std::string UART_DEVICE = "/dev/ttyACM0";  // UART устройство
+const std::string SERVER_IP = "192.168.0.104";  // IP адрес ноутбука
 //const char* SERVER_IP = "192.168.100.120";  // IP WSL
 // const char* SERVER_IP = "192.168.1.55";
 
@@ -110,12 +110,7 @@ void videoStreamSender() {
     gst_init(nullptr, nullptr);
 
     // Создание элемента пайплайна GStreamer
-    std::string pipelineStr =
-"v4l2src ! "
-"videoconvert ! "
-"x264enc tune=zerolatency bitrate=500 speed-preset=ultrafast ! "
-"rtph264pay ! "
-"udpsink host=" + std::string(SERVER_IP) + " port=" + std::to_string(VIDEO_PORT);
+    std::string pipelineStr = "v4l2src device=/dev/video0 ! image/jpeg, width=640, height=480, framerate=30/1 ! jpegparse ! avdec_mjpeg ! videoconvert ! x264enc tune=zerolatency bitrate=1000 speed-preset=ultrafast ! rtph264pay config-interval=1 pt=96 ! udpsink host=" + SERVER_IP + " port=12346";
     GError* error = nullptr;
     GstElement* pipeline = gst_parse_launch(pipelineStr.c_str(), &error);
 
@@ -144,7 +139,7 @@ void videoStreamSender() {
     gst_object_unref(pipeline);
 }
 
-void sendLogs(int uart, const char* server_ip) {
+void sendLogs(int uart, const std::string& server_ip) {
     int log_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (log_sock < 0) {
         std::cerr << "Error binding log socket." << std::endl;
@@ -154,7 +149,7 @@ void sendLogs(int uart, const char* server_ip) {
     sockaddr_in logAddr;
     logAddr.sin_family = AF_INET;
     logAddr.sin_port = htons(LOGS_PORT);
-    inet_pton(AF_INET, server_ip, &logAddr.sin_addr);
+    inet_pton(AF_INET, server_ip.c_str(), &logAddr.sin_addr);
 
     while (logs_running) {
         char uart_buffer[256] = {0};
@@ -178,7 +173,7 @@ int main() {
     }
 
     // Открытие UART
-    int uart = serOpen((char*)UART_DEVICE, 9600, 0);
+    int uart = serOpen(UART_DEVICE, 9600, 0);
     if (uart < 0) {
         std::cerr << "UART opening error." << std::endl;
         gpioTerminate();
@@ -229,17 +224,23 @@ int main() {
     std::thread heartbeatThread(monitor_heartbeat);                 // Поток для мониторинга сердцебиения
 
     // Основной цикл: приём команд и управление UART
+    bool e_sent = false;
+
     while (true) {
         if (connection_lost) {
-            std::cout << "Connection is lost" << std::endl;
-            serWriteByte(uart, 'e');
-            std::this_thread::sleep_for(std::chrono::seconds(1)); // Исключаем спам
+            if (!e_sent) {
+                std::cout << "Connection is lost" << std::endl;
+                serWriteByte(uart, 'e');   // отправляем ОДИН раз
+                e_sent = true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
 
         if (connection_restored) {
-            serWriteByte(uart, 's');
             connection_restored = false;
+            connection_lost = false;
+            e_sent = false;              
             continue;
         }
 
