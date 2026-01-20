@@ -25,7 +25,7 @@
 #include <cstring>
 
 #define SERVER_IP       "192.168.0.103"  // IP raspberry 
-// #define SERVER_IP       "192.168.31.34"  // IP in unversity
+// #define SERVER_IP       "192.168.31.34"  // IP in class
 #define SERVER_PORT     12345
 #define VIDEO_PORT      12346
 #define LOGS_PORT       12347
@@ -54,7 +54,6 @@ void send_heartbeat() {
 
     close(sock);
 }
-
 
 void receive_logs(QTextEdit* log_widget) {
     if (!log_widget) return;
@@ -97,11 +96,10 @@ void receive_logs(QTextEdit* log_widget) {
     close(sock);
 }
 
-
-class ControllerWindow : public QWidget {
+class controller_window : public QWidget {
     Q_OBJECT
 public:
-    explicit ControllerWindow(QWidget* parent = nullptr)
+    explicit controller_window(QWidget* parent = nullptr)
         : QWidget(parent)
     {
         setFixedSize(800, 600);
@@ -119,15 +117,15 @@ public:
         setLayout(layout);
 
         timer = new QTimer(this);
-        connect(timer, &QTimer::timeout, this, &ControllerWindow::updateFrame);
+        connect(timer, &QTimer::timeout, this, &controller_window::update_frame);
         timer->start(33);
 
-        startVideoOpenThread();
+        start_video_open_thread();
     }
 
-    ~ControllerWindow() override {
+    ~controller_window() override {
         video_ready = false;
-        if (videoOpenThread.joinable()) videoOpenThread.join();
+        if (video_open_thread.joinable()) video_open_thread.join();
     }
 
     QTextEdit* logs() const { return log_widget; }
@@ -140,22 +138,14 @@ protected:
             case Qt::Key_S: command = '2'; break;
             case Qt::Key_D: command = '3'; break;
             case Qt::Key_A: command = '4'; break;
-            case Qt::Key_Y: command = 'y'; do_not_stop = true; break;
-            case Qt::Key_O: command = 'o'; do_not_stop = true; break;
-            case Qt::Key_Space: command = 's'; break;
-            case Qt::Key_1: command = 'f'; do_not_stop = true; break;
-            case Qt::Key_Up: command = '5'; break;
-            case Qt::Key_Down: command = '6'; break;
-            case Qt::Key_Left: command = '7'; break;
-            case Qt::Key_Right: command = '8'; break;
-            case Qt::Key_Escape: running = false; running_logs = false; break;
+            case Qt::Key_E: command = '5'; break;
         }
-        if (command && command_sock != -1) sendCommand(command);
+        if (command && command_sock != -1) send_command(command);
     }
 
     void keyReleaseEvent(QKeyEvent* /*event*/) override {
         if (do_not_stop) { do_not_stop = false; return; }
-        if (command_sock != -1) sendCommand('s');
+        if (command_sock != -1) send_command('s');
     }
 
 private:
@@ -165,9 +155,9 @@ private:
 
     cv::VideoCapture cap;
     std::atomic<bool> video_ready{false};
-    std::thread videoOpenThread;
+    std::thread video_open_thread;
 
-    void startVideoOpenThread() {
+    void start_video_open_thread() {
         const std::string gst_pipeline =
             "udpsrc port=12346 caps=application/x-rtp,media=video,encoding-name=H264,payload=96 "
             "! rtph264depay "
@@ -175,7 +165,7 @@ private:
             "! videoconvert "
             "! appsink sync=false";
 
-        videoOpenThread = std::thread([this, gst_pipeline]() {
+        video_open_thread = std::thread([this, gst_pipeline]() {
             bool ok = cap.open(gst_pipeline, cv::CAP_GSTREAMER);
 
             video_ready = ok;
@@ -196,8 +186,7 @@ private:
         });
     }
 
-
-    void updateFrame() {
+    void update_frame() {
         if (!video_ready.load()) return;
         if (!cap.isOpened()) return;
 
@@ -216,7 +205,7 @@ private:
         );
     }
 
-    void sendCommand(char cmd) {
+    void send_command(char cmd) {
         sockaddr_in server{};
         server.sin_family = AF_INET;
         server.sin_port = htons(SERVER_PORT);
@@ -224,7 +213,6 @@ private:
         sendto(command_sock, &cmd, 1, 0, (sockaddr*)&server, sizeof(server));
     }
 };
-
 
 int main(int argc, char* argv[]) {
     signal(SIGINT, [](int){ running = false; running_logs = false; });
@@ -234,20 +222,19 @@ int main(int argc, char* argv[]) {
 
     QApplication app(argc, argv);
 
-    ControllerWindow window;
+    controller_window window;
     window.show();
 
-    std::thread heartbeatThread(send_heartbeat);
-
-    std::thread logThread(receive_logs, window.logs());
+    std::thread heartbeat_thread(send_heartbeat);
+    std::thread log_thread(receive_logs, window.logs());
 
     int ret = app.exec();
 
     running = false;
     running_logs = false;
 
-    if (heartbeatThread.joinable()) heartbeatThread.join();
-    if (logThread.joinable()) logThread.join();
+    if (heartbeat_thread.joinable()) heartbeat_thread.join();
+    if (log_thread.joinable()) log_thread.join();
 
     close(command_sock);
     return ret;
