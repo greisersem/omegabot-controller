@@ -24,7 +24,8 @@
 #include <csignal>
 #include <cstring>
 
-#define SERVER_IP       "192.168.31.172"
+#define RASPBERRY_IP "192.168.0.103"  // IP raspberry дома
+// #define RASPBERRY_IP "192.168.31.34"  // IP raspberry в аудитории
 #define SERVER_PORT     12345
 #define VIDEO_PORT      12346
 #define LOGS_PORT       12347
@@ -44,7 +45,7 @@ void send_heartbeat() {
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(HEARTBEAT_PORT);
-    inet_pton(AF_INET, SERVER_IP, &addr.sin_addr);
+    inet_pton(AF_INET, RASPBERRY_IP, &addr.sin_addr);
 
     while (running) {
         const char* msg = "1";
@@ -228,7 +229,7 @@ private:
         sockaddr_in server{};
         server.sin_family = AF_INET;
         server.sin_port = htons(SERVER_PORT);
-        inet_pton(AF_INET, SERVER_IP, &server.sin_addr);
+        inet_pton(AF_INET, RASPBERRY_IP, &server.sin_addr);
         sendto(command_sock, &cmd, 1, 0, (sockaddr*)&server, sizeof(server));
     }
 };
