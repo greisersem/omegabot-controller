@@ -21,7 +21,7 @@ volatile bool heartbeat_running = true;
 volatile bool connection_lost = false;
 volatile bool connection_restored = false;
 
-auto CRITICAL_TIMEOUT = std::chrono::seconds(120);
+auto CRITICAL_TIMEOUT = std::chrono::seconds(30);
 
 void monitor_heartbeat()
 {
@@ -173,7 +173,7 @@ int main() {
     }
 
     char uart_device[] = UART_DEVICE;
-    int uart = serOpen(uart_device, 9600, 0);
+    int uart = serOpen(uart_device, 115200, 0);
     if (uart < 0) {
         std::cerr << "UART opening error." << std::endl;
         gpioTerminate();
@@ -226,7 +226,7 @@ int main() {
         if (connection_lost) {
             if (!e_sent) {
                 std::cout << "Connection is lost" << std::endl;
-                serWriteByte(uart, 'e');
+                serWriteByte(uart, 'o');
                 e_sent = true;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -248,8 +248,6 @@ int main() {
         if (received > 0) {
             std::cout << "Received command: " << buffer[0] << std::endl;
             serWriteByte(uart, buffer[0]);
-
-            CRITICAL_TIMEOUT = std::chrono::seconds(15);
         }
     }
 

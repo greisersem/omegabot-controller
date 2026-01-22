@@ -160,7 +160,7 @@ public:
                 send_command(cmd);
             }
         });
-        command_timer->start(10);
+        command_timer->start(20);
 
         start_video_open_thread();
     }
@@ -187,7 +187,7 @@ protected:
             case Qt::Key_A: current_command = 'a'; break;
             case Qt::Key_E: current_command = 'e'; break;
             case Qt::Key_Q: current_command = 'q'; break;
-            case Qt::Key_R: current_command = 'r'; break;
+            case Qt::Key_R: current_command = 'x'; break;
             default: break;
         }
     }
@@ -203,7 +203,7 @@ protected:
             case Qt::Key_A:
             case Qt::Key_E:
             case Qt::Key_Q:
-            case Qt::Key_R:
+            case Qt::Key_X:
                 current_command = 0;
                 break;
             default:

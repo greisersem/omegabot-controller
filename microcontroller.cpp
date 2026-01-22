@@ -15,8 +15,17 @@
 DHT dht_sensor(DHTPIN, DHTTYPE);
 
 volatile bool STOP_COMMAND = false;
+
 bool obstacle = false;
+unsigned long last_obstacle_log_time = 0;
+const unsigned long OBSTACLE_LOG_INTERVAL = 2000;
+
 volatile bool LOGS_ENABLED = true;
+
+bool emergency_back = false;
+unsigned long emergency_start = 0;
+const unsigned long emergency_duration = 3000;
+
 
 class Driver {
 public:
@@ -32,7 +41,16 @@ public:
     void execute_wheel_command(char command);
     void execute_other_command(char command);
     long get_distance();
-    void write_logs(char command, unsigned long time);
+    void write_logs(const char* command);
+    double get_temperature();
+    double get_humidity();
+    void start_emergency_back();
+
+    bool rotating = false;
+    unsigned long rotate_start = 0;
+    int rotate_duration = 0;
+    int rotate_left_speed = 0;
+    int rotate_right_speed = 0;
 
 private:
     int pin_motor_left;
@@ -41,17 +59,9 @@ private:
     int pin_motor_dir_right;
     int speed;
 
-    Servo servo_arm;
-    Servo servo_hand;
     char prev_command = '0';
     unsigned long last_command_time = 0;
     int rotation_time = 1500;
-
-    bool rotating = false;
-    unsigned long rotate_start = 0;
-    int rotate_duration = 0;
-    int rotate_left_speed = 0;
-    int rotate_right_speed = 0;
 };
 
 Driver::Driver(int left_pin, int right_pin, int left_dir_pin, int right_dir_pin,
@@ -74,8 +84,6 @@ Driver::Driver(int left_pin, int right_pin, int left_dir_pin, int right_dir_pin,
     dht_sensor.begin();
 
     set_motors(0, 0);
-    servo_arm.write(0);
-    servo_hand.write(150);
 }
 
 void Driver::clear_serial_buffer() {
@@ -101,11 +109,11 @@ char Driver::read_command() {
     return command;
 }
 
-void Driver::write_logs(char command, unsigned long time) {
+void Driver::write_logs(const char* action) {
     Serial.print("Time: ");
-    Serial.print(time);
-    Serial.print("; Command: ");
-    Serial.println(command);
+    Serial.print(millis());
+    Serial.print(" -> ");
+    Serial.println(action);
 }
 
 void Driver::set_motors(int velo_left, int velo_right) {
@@ -150,38 +158,82 @@ void Driver::turn_on_degree(int degree) {
     rotating = true;
 }
 
+
+double Driver::get_temperature() {
+    float temp = dht_sensor.readTemperature();
+    if (isnan(temp)) return -1.0;
+    return (double)temp;
+}
+
+
+double Driver::get_humidity() {
+    float hum = dht_sensor.readHumidity();
+    if (isnan(hum)) return -1.0;
+    return (double)hum;
+}
+
+
 void Driver::connection_lost_case() {
     stop_motors();
 }
 
+
+void Driver::start_emergency_back() {
+    emergency_back = true;
+    emergency_start = millis();
+    STOP_COMMAND = false;   // снимаем стоп если был
+}
+
+
+
 void Driver::execute_wheel_command(char command) {
-    if (command == '0') {
-        stop_motors();
-        return;
-    }
 
     STOP_COMMAND = false;
 
-    if (obstacle && command == '1') {
-        set_motors(0, 0);
-        return;
-    }
-
     switch (command) {
-        case 'w': set_motors(speed, speed); break; 
-        case 's': set_motors(-speed, -speed); break; 
-        case 'd': set_motors(speed, -speed); break; 
-        case 'a': set_motors(-speed, speed); break;   
-        case 'q': turn_on_degree(-360); break;
-        case 'e': turn_on_degree(360); break;
-        default: stop_motors(); break;
+
+        case 'w':
+            set_motors(speed, speed);
+            write_logs("Moving forward");
+            break;
+
+        case 's':
+            set_motors(-speed, -speed);
+            write_logs("Moving backward");
+            break;
+
+        case 'd':
+            set_motors(speed, -speed);
+            write_logs("Turning right");
+            break;
+
+        case 'a':
+            set_motors(-speed, speed);
+            write_logs("Turning left");
+            break;
+
+        case 'q':
+            turn_on_degree(-360);
+            write_logs("Rotating 360 degrees left");
+            break;
+
+        case 'e':
+            turn_on_degree(360);
+            write_logs("Rotating 360 degrees right");
+            break;
+
+        default:
+            stop_motors();
+            write_logs("Motors stopped");
+            break;
     }
 }
+
 
 void Driver::execute_other_command(char command) {
     if (command == 'e') connection_lost_case();
     else if (command == 'o') turn_on_degree(360);
-    else if (command == 's') { STOP_COMMAND = true; stop_motors(); }
+    else if (command == 'x') {STOP_COMMAND = true; stop_motors();}
     else if (command == 'f') {
         float temp = get_temperature();
         float hum  = get_humidity();
@@ -201,36 +253,29 @@ void Driver::execute_other_command(char command) {
 Driver Wheels(6, 5, 7, 4, A1, A2, 200);
 
 void setup() {
-    Serial.begin(9600);
+    Serial.begin(115200);
     delay(1000);
     Serial.println("Arduino started. Logging enabled...");
 }
 
-void loop() {
-    unsigned long currentMillis = millis();
 
-    long distance = Wheels.get_distance();
-    if (distance > 0 && distance < CRITICAL_DISTANCE) {
-        if (!obstacle) Serial.println("Obstacle detected! Motors stopped");
-        obstacle = true;
-        Wheels.stop_motors();
-    } else {
-        obstacle = false;
-    }
+void loop() {
+    unsigned long current_millis = millis();
+
 
     if (Wheels.rotating) {
-        if (currentMillis - Wheels.rotate_start < Wheels.rotate_duration) {
+        if (current_millis - Wheels.rotate_start < Wheels.rotate_duration) {
             Wheels.set_motors(Wheels.rotate_left_speed, Wheels.rotate_right_speed);
         } else {
             Wheels.rotating = false;
             Wheels.stop_motors();
+            Wheels.write_logs("Rotation complete");
         }
     } else {
         char command = Wheels.read_command();
         if (command != '0') {
             Wheels.execute_wheel_command(command);
             Wheels.execute_other_command(command);
-            if (LOGS_ENABLED) Wheels.write_logs(command, currentMillis);
             Wheels.clear_serial_buffer();
         }
     }
