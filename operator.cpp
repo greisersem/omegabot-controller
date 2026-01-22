@@ -187,7 +187,7 @@ protected:
             case Qt::Key_A: current_command = 'a'; break;
             case Qt::Key_E: current_command = 'e'; break;
             case Qt::Key_Q: current_command = 'q'; break;
-            case Qt::Key_R: current_command = 'x'; break;
+            case Qt::Key_X: current_command = 'x'; break;
             default: break;
         }
     }
@@ -253,7 +253,10 @@ private:
                     std::tm* tm_ptr = std::localtime(&t);
 
                     std::ostringstream filename;
-                    filename << std::put_time(tm_ptr, "%Y-%m-%d_%H-%M-%S") << ".avi";
+                    filename << std::getenv("HOME")
+                            << "/Desktop/omegabot-controller/video_"
+                            << std::put_time(tm_ptr, "%Y-%m-%d_%H-%M-%S")
+                            << ".avi";
 
                     video_writer.open(
                         filename.str(),
@@ -347,7 +350,12 @@ int main(int argc, char* argv[]) {
     std::tm* tm_ptr = std::localtime(&t);
 
     std::ostringstream filename;
-    filename << "logs_" << std::put_time(tm_ptr, "%Y-%m-%d_%H-%M-%S") << ".txt";
+    filename << std::getenv("HOME")
+            << "/Desktop/omegabot-controller/logs_"
+            << std::put_time(tm_ptr, "%Y-%m-%d_%H-%M-%S")
+            << ".txt";
+
+    log_file.open(filename.str());
 
     log_file.open(filename.str());
 

@@ -22,10 +22,6 @@ const unsigned long OBSTACLE_LOG_INTERVAL = 2000;
 
 volatile bool LOGS_ENABLED = true;
 
-bool emergency_back = false;
-unsigned long emergency_start = 0;
-const unsigned long emergency_duration = 3000;
-
 
 class Driver {
 public:
@@ -51,6 +47,10 @@ public:
     int rotate_duration = 0;
     int rotate_left_speed = 0;
     int rotate_right_speed = 0;
+
+    bool emergency_back = false;
+    unsigned long emergency_start = 0;
+    const unsigned long emergency_duration = 3000;
 
 private:
     int pin_motor_left;
@@ -232,8 +232,13 @@ void Driver::execute_wheel_command(char command) {
 
 void Driver::execute_other_command(char command) {
     if (command == 'e') connection_lost_case();
-    else if (command == 'o') turn_on_degree(360);
-    else if (command == 'x') {STOP_COMMAND = true; stop_motors();}
+    else if (command == 'o') {
+    Serial.println("Emergency: connection lost. Moving backward 3 seconds");
+    start_emergency_back();
+    } else if (command == 'x') {
+        STOP_COMMAND = true; 
+        stop_motors();
+    }
     else if (command == 'f') {
         float temp = get_temperature();
         float hum  = get_humidity();
@@ -262,6 +267,23 @@ void setup() {
 void loop() {
     unsigned long current_millis = millis();
 
+    long distance = Wheels.get_distance();
+
+    if (distance > 0 && distance < CRITICAL_DISTANCE) {
+
+        if (!obstacle) {
+            obstacle = true;
+            last_obstacle_log_time = 0;
+        }
+
+        if (current_millis - last_obstacle_log_time >= OBSTACLE_LOG_INTERVAL) {
+            Wheels.write_logs("Obstacle detected! Forward blocked");
+            last_obstacle_log_time = current_millis;
+        }
+
+    } else {
+        obstacle = false;
+    }
 
     if (Wheels.rotating) {
         if (current_millis - Wheels.rotate_start < Wheels.rotate_duration) {
@@ -273,6 +295,17 @@ void loop() {
         }
     } else {
         char command = Wheels.read_command();
+
+        if (Wheels.emergency_back) {
+            if (millis() - Wheels.emergency_start < Wheels.emergency_duration) {
+                Wheels.set_motors(-200, -200);
+            } else {
+                Wheels.emergency_back = false;
+                Wheels.stop_motors();
+            }
+            return;
+        }
+
         if (command != '0') {
             Wheels.execute_wheel_command(command);
             Wheels.execute_other_command(command);
