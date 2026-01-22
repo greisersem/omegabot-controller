@@ -23,6 +23,13 @@
 #include <vector>
 #include <csignal>
 #include <cstring>
+#include <chrono>
+#include <ctime>
+#include <sstream>
+#include <iomanip>
+#include <fstream>
+#include <mutex>
+
 
 #define SERVER_IP       "192.168.0.103"  // IP raspberry 
 // #define SERVER_IP       "192.168.31.34"  // IP in class
@@ -33,7 +40,8 @@
 
 std::atomic<bool> running(true);
 std::atomic<bool> running_logs(true);
-std::atomic<bool> do_not_stop(false);
+std::ofstream log_file;
+std::mutex log_mutex;
 
 int command_sock = -1;
 
@@ -54,6 +62,22 @@ void send_heartbeat() {
 
     close(sock);
 }
+
+
+void write_log_to_file(const std::string& text) {
+    std::lock_guard<std::mutex> lock(log_mutex);
+
+    if (!log_file.is_open())
+        return;
+
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm* tm_ptr = std::localtime(&t);
+
+    log_file << "[" << std::put_time(tm_ptr, "%Y-%m-%d %H:%M:%S") << "] "
+             << text << std::endl;
+}
+
 
 void receive_logs(QTextEdit* log_widget) {
     if (!log_widget) return;
@@ -79,10 +103,16 @@ void receive_logs(QTextEdit* log_widget) {
     socklen_t client_len = sizeof(client);
 
     while (running_logs) {
-        int n = recvfrom(sock, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&client, &client_len);
+        int n = recvfrom(sock, buffer, sizeof(buffer) - 1, 0,
+                        (sockaddr*)&client, &client_len);
+
         if (n > 0) {
             buffer[n] = '\0';
+
+            std::string msg_str(buffer);
             QString msg = QString::fromUtf8(buffer);
+
+            write_log_to_file(msg_str);
 
             QMetaObject::invokeMethod(
                 log_widget,
@@ -90,11 +120,13 @@ void receive_logs(QTextEdit* log_widget) {
                 Qt::QueuedConnection
             );
         }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
     close(sock);
 }
+
 
 class controller_window : public QWidget {
     Q_OBJECT
@@ -116,46 +148,83 @@ public:
         layout->addWidget(log_widget);
         setLayout(layout);
 
-        timer = new QTimer(this);
-        connect(timer, &QTimer::timeout, this, &controller_window::update_frame);
-        timer->start(33);
+        video_timer = new QTimer(this);
+        connect(video_timer, &QTimer::timeout,
+                this, &controller_window::update_frame);
+        video_timer->start(33);
+
+        command_timer = new QTimer(this);
+        connect(command_timer, &QTimer::timeout, this, [this]() {
+            char cmd = current_command.load();
+            if (cmd != 0 && command_sock != -1) {
+                send_command(cmd);
+            }
+        });
+        command_timer->start(10);
 
         start_video_open_thread();
     }
 
     ~controller_window() override {
         video_ready = false;
-        if (video_open_thread.joinable()) video_open_thread.join();
+        if (video_open_thread.joinable())
+            video_open_thread.join();
+        if (video_writer.isOpened())
+            video_writer.release();
     }
 
     QTextEdit* logs() const { return log_widget; }
 
 protected:
     void keyPressEvent(QKeyEvent* event) override {
-        char command = 0;
+        if (event->isAutoRepeat())
+            return;
+
         switch (event->key()) {
-            case Qt::Key_W: command = '1'; break;
-            case Qt::Key_S: command = '2'; break;
-            case Qt::Key_D: command = '3'; break;
-            case Qt::Key_A: command = '4'; break;
-            case Qt::Key_E: command = '5'; break;
+            case Qt::Key_W: current_command = 'w'; break;
+            case Qt::Key_S: current_command = 's'; break;
+            case Qt::Key_D: current_command = 'd'; break;
+            case Qt::Key_A: current_command = 'a'; break;
+            case Qt::Key_E: current_command = 'e'; break;
+            case Qt::Key_Q: current_command = 'q'; break;
+            case Qt::Key_R: current_command = 'r'; break;
+            default: break;
         }
-        if (command && command_sock != -1) send_command(command);
     }
 
-    void keyReleaseEvent(QKeyEvent* /*event*/) override {
-        if (do_not_stop) { do_not_stop = false; return; }
-        if (command_sock != -1) send_command('s');
+    void keyReleaseEvent(QKeyEvent* event) override {
+        if (event->isAutoRepeat())
+            return;
+
+        switch (event->key()) {
+            case Qt::Key_W:
+            case Qt::Key_S:
+            case Qt::Key_D:
+            case Qt::Key_A:
+            case Qt::Key_E:
+            case Qt::Key_Q:
+            case Qt::Key_R:
+                current_command = 0;
+                break;
+            default:
+                break;
+        }
     }
 
 private:
     QLabel* video_label = nullptr;
     QTextEdit* log_widget = nullptr;
-    QTimer* timer = nullptr;
+
+    QTimer* video_timer = nullptr;
+    QTimer* command_timer = nullptr;
 
     cv::VideoCapture cap;
     std::atomic<bool> video_ready{false};
     std::thread video_open_thread;
+    cv::VideoWriter video_writer;
+    std::atomic<bool> recording{false};
+
+    std::atomic<char> current_command{0};
 
     void start_video_open_thread() {
         const std::string gst_pipeline =
@@ -167,17 +236,45 @@ private:
 
         video_open_thread = std::thread([this, gst_pipeline]() {
             bool ok = cap.open(gst_pipeline, cv::CAP_GSTREAMER);
-
             video_ready = ok;
+
+            if (ok) {
+                cv::Mat first_frame;
+                cap >> first_frame;
+
+                if (!first_frame.empty()) {
+
+                    int width  = first_frame.cols;
+                    int height = first_frame.rows;
+                    double fps = 30.0;
+
+                    auto now = std::chrono::system_clock::now();
+                    std::time_t t = std::chrono::system_clock::to_time_t(now);
+                    std::tm* tm_ptr = std::localtime(&t);
+
+                    std::ostringstream filename;
+                    filename << std::put_time(tm_ptr, "%Y-%m-%d_%H-%M-%S") << ".avi";
+
+                    video_writer.open(
+                        filename.str(),
+                        cv::VideoWriter::fourcc('M','J','P','G'),
+                        fps,
+                        cv::Size(width, height)
+                    );
+
+                    if (video_writer.isOpened()) {
+                        recording = true;
+                        video_writer.write(first_frame);
+                    }
+                }
+            }
 
             QMetaObject::invokeMethod(
                 this,
                 [this, ok]() {
                     if (!ok) {
-                        log_widget->append("Error opening video stream! (cap.open blocked/failed)");
                         video_label->setText("Video not available");
                     } else {
-                        log_widget->append("Video stream opened");
                         video_label->setText("");
                     }
                 },
@@ -186,15 +283,28 @@ private:
         });
     }
 
+
     void update_frame() {
-        if (!video_ready.load()) return;
-        if (!cap.isOpened()) return;
+        if (!video_ready.load())
+            return;
+
+        if (!cap.isOpened())
+            return;
 
         cv::Mat frame;
         cap >> frame;
-        if (frame.empty()) return;
 
-        QImage img(frame.data, frame.cols, frame.rows, frame.step, QImage::Format_BGR888);
+        if (frame.empty())
+            return;
+
+        if (recording && video_writer.isOpened())
+            video_writer.write(frame); 
+
+        QImage img(frame.data,
+                   frame.cols,
+                   frame.rows,
+                   frame.step,
+                   QImage::Format_BGR888);
 
         video_label->setPixmap(
             QPixmap::fromImage(img).scaled(
@@ -210,9 +320,16 @@ private:
         server.sin_family = AF_INET;
         server.sin_port = htons(SERVER_PORT);
         inet_pton(AF_INET, SERVER_IP, &server.sin_addr);
-        sendto(command_sock, &cmd, 1, 0, (sockaddr*)&server, sizeof(server));
+
+        sendto(command_sock,
+               &cmd,
+               1,
+               0,
+               (sockaddr*)&server,
+               sizeof(server));
     }
 };
+
 
 int main(int argc, char* argv[]) {
     signal(SIGINT, [](int){ running = false; running_logs = false; });
@@ -224,6 +341,15 @@ int main(int argc, char* argv[]) {
 
     controller_window window;
     window.show();
+
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm* tm_ptr = std::localtime(&t);
+
+    std::ostringstream filename;
+    filename << "logs_" << std::put_time(tm_ptr, "%Y-%m-%d_%H-%M-%S") << ".txt";
+
+    log_file.open(filename.str());
 
     std::thread heartbeat_thread(send_heartbeat);
     std::thread log_thread(receive_logs, window.logs());
