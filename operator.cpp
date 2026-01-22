@@ -31,7 +31,7 @@
 #include <mutex>
 
 
-#define SERVER_IP       "192.168.0.104"  // IP raspberry 
+#define SERVER_IP       "192.168.0.105"  // IP raspberry 
 // #define SERVER_IP       "192.168.31.34"  // IP in class
 #define SERVER_PORT     12345
 #define VIDEO_PORT      12346
