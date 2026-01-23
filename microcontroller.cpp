@@ -181,7 +181,7 @@ void Driver::connection_lost_case() {
 void Driver::start_emergency_back() {
     emergency_back = true;
     emergency_start = millis();
-    STOP_COMMAND = false;   // снимаем стоп если был
+    STOP_COMMAND = false;
 }
 
 
@@ -213,13 +213,13 @@ void Driver::execute_wheel_command(char command) {
             break;
 
         case 'q':
-            turn_on_degree(-360);
-            write_logs("Rotating 360 degrees left");
+            turn_on_degree(-180);
+            write_logs("Rotating 180 degrees left");
             break;
 
         case 'e':
-            turn_on_degree(360);
-            write_logs("Rotating 360 degrees right");
+            turn_on_degree(180);
+            write_logs("Rotating 180 degrees right");
             break;
 
         default:
@@ -231,13 +231,13 @@ void Driver::execute_wheel_command(char command) {
 
 
 void Driver::execute_other_command(char command) {
-    if (command == 'e') connection_lost_case();
-    else if (command == 'o') {
-    Serial.println("Emergency: connection lost. Moving backward 3 seconds");
+    if (command == 'o') {
     start_emergency_back();
+    write_logs("Connection lost. Moving backward 3 seconds");
     } else if (command == 'x') {
         STOP_COMMAND = true; 
         stop_motors();
+        write_logs("Motors stopped");
     }
     else if (command == 'f') {
         float temp = get_temperature();

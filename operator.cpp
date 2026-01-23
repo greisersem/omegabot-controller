@@ -188,6 +188,7 @@ protected:
             case Qt::Key_E: current_command = 'e'; break;
             case Qt::Key_Q: current_command = 'q'; break;
             case Qt::Key_X: current_command = 'x'; break;
+            case Qt::Key_F: current_command = 'f'; break;
             default: break;
         }
     }
@@ -318,6 +319,7 @@ private:
         );
     }
 
+
     void send_command(char cmd) {
         sockaddr_in server{};
         server.sin_family = AF_INET;
@@ -354,8 +356,6 @@ int main(int argc, char* argv[]) {
             << "/Desktop/omegabot-controller/logs_"
             << std::put_time(tm_ptr, "%Y-%m-%d_%H-%M-%S")
             << ".txt";
-
-    log_file.open(filename.str());
 
     log_file.open(filename.str());
 
