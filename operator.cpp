@@ -31,8 +31,8 @@
 #include <mutex>
 
 
-#define SERVER_IP       "192.168.0.105"  // IP raspberry 
-// #define SERVER_IP       "192.168.31.34"  // IP in class
+// #define SERVER_IP       "192.168.0.105"  // IP raspberry 
+#define SERVER_IP       "192.168.31.172"  // IP in class
 #define SERVER_PORT     12345
 #define VIDEO_PORT      12346
 #define LOGS_PORT       12347
@@ -128,10 +128,10 @@ void receive_logs(QTextEdit* log_widget) {
 }
 
 
-class controller_window : public QWidget {
+class ControllerWindow : public QWidget {
     Q_OBJECT
 public:
-    explicit controller_window(QWidget* parent = nullptr)
+    explicit ControllerWindow(QWidget* parent = nullptr)
         : QWidget(parent)
     {
         setFixedSize(800, 600);
@@ -150,7 +150,7 @@ public:
 
         video_timer = new QTimer(this);
         connect(video_timer, &QTimer::timeout,
-                this, &controller_window::update_frame);
+                this, &ControllerWindow::update_frame);
         video_timer->start(33);
 
         command_timer = new QTimer(this);
@@ -165,7 +165,7 @@ public:
         start_video_open_thread();
     }
 
-    ~controller_window() override {
+    ~ControllerWindow() override {
         video_ready = false;
         if (video_open_thread.joinable())
             video_open_thread.join();
@@ -185,10 +185,13 @@ protected:
             case Qt::Key_S: current_command = 's'; break;
             case Qt::Key_D: current_command = 'd'; break;
             case Qt::Key_A: current_command = 'a'; break;
-            case Qt::Key_E: current_command = 'e'; break;
-            case Qt::Key_Q: current_command = 'q'; break;
-            case Qt::Key_X: current_command = 'x'; break;
-            case Qt::Key_F: current_command = 'f'; break;
+
+            case Qt::Key_E: send_command('e'); break;
+            case Qt::Key_Q: send_command('q'); break;
+            case Qt::Key_C: send_command('c'); break;
+            case Qt::Key_F: send_command('f'); break;
+            case Qt::Key_X: send_command('x'); break;
+
             default: break;
         }
     }
@@ -202,9 +205,6 @@ protected:
             case Qt::Key_S:
             case Qt::Key_D:
             case Qt::Key_A:
-            case Qt::Key_E:
-            case Qt::Key_Q:
-            case Qt::Key_X:
                 current_command = 0;
                 break;
             default:
@@ -344,7 +344,7 @@ int main(int argc, char* argv[]) {
 
     QApplication app(argc, argv);
 
-    controller_window window;
+    ControllerWindow window;
     window.show();
 
     auto now = std::chrono::system_clock::now();
