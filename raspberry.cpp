@@ -12,9 +12,9 @@
 #define LOGS_PORT       12347  // Порт для отправки логов
 #define HEARTBEAT_PORT  12348  // Порт для отслеживания соединения
 
-#define UART_DEVICE "/dev/ttyACM0"   // UART устройство
-#define SERVER_IP   "192.168.0.104"  // IP адрес ноутбука дома
-// #define SERVER_IP "192.168.31.34"    // IP вдрес ноутбука в аудитории
+#define UART_DEVICE "/dev/ttyUSB0"   // UART устройство
+#define SERVER_IP   "192.168.0.103"  // IP адрес ноутбука дома
+// #define SERVER_IP "192.168.31.152"    // IP вдрес ноутбука в аудитории
 
 volatile bool logs_running = true;
 volatile bool heartbeat_running = true;
@@ -110,7 +110,7 @@ void video_stream_sender() {
         "v4l2src device=/dev/video0 ! "
         "image/jpeg, width=640, height=480, "
         "framerate=30/1 ! jpegparse ! avdec_mjpeg ! "
-        "videoconvert ! x264enc tune=zerolatency bitrate=1000 "
+        "videoconvert ! x264enc tune=zerolatency bitrate=2000 "
         "speed-preset=ultrafast ! "
         "rtph264pay config-interval=1 pt=96 !" 
         "udpsink host=" + std::string(SERVER_IP) + " port=" + std::to_string(VIDEO_PORT);
