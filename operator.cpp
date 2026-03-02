@@ -31,8 +31,8 @@
 #include <mutex>
 
 
-// #define SERVER_IP       "192.168.0.105"  // IP raspberry 
-#define SERVER_IP       "192.168.31.172"  // IP in class
+#define SERVER_IP       "192.168.0.105"  // IP raspberry 
+// #define SERVER_IP       "192.168.31.172"  // IP in class
 #define SERVER_PORT     12345
 #define VIDEO_PORT      12346
 #define LOGS_PORT       12347
@@ -44,6 +44,17 @@ std::ofstream log_file;
 std::mutex log_mutex;
 
 int command_sock = -1;
+
+std::vector<std::string> classNames = {
+        "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light",
+        "fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow",
+        "elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee",
+        "skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle",
+        "wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange",
+        "broccoli","carrot","hot dog","pizza","donut","cake","chair","couch","potted plant","bed",
+        "dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven",
+        "toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"
+    };
 
 void send_heartbeat() {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -65,8 +76,6 @@ void send_heartbeat() {
 
 
 void write_log_to_file(const std::string& text) {
-    std::lock_guard<std::mutex> lock(log_mutex);
-
     if (!log_file.is_open())
         return;
 
@@ -163,6 +172,7 @@ public:
         command_timer->start(20);
 
         start_video_open_thread();
+        init_yolo();
     }
 
     ~ControllerWindow() override {
@@ -185,12 +195,12 @@ protected:
             case Qt::Key_S: current_command = 's'; break;
             case Qt::Key_D: current_command = 'd'; break;
             case Qt::Key_A: current_command = 'a'; break;
+            case Qt::Key_X: current_command = 'x'; break;
 
             case Qt::Key_E: send_command('e'); break;
             case Qt::Key_Q: send_command('q'); break;
             case Qt::Key_C: send_command('c'); break;
             case Qt::Key_F: send_command('f'); break;
-            case Qt::Key_X: send_command('x'); break;
 
             default: break;
         }
@@ -225,15 +235,19 @@ private:
     cv::VideoWriter video_writer;
     std::atomic<bool> recording{false};
 
+    int frame_count = 0;
+    cv::Mat last_annotated_frame;
+    cv::dnn::Net yolo_net;
+
     std::atomic<char> current_command{0};
 
     void start_video_open_thread() {
         const std::string gst_pipeline =
-            "udpsrc port=12346 caps=application/x-rtp,media=video,encoding-name=H264,payload=96 "
+            "udpsrc port=" + std::to_string(VIDEO_PORT) + " caps=application/x-rtp,media=video,encoding-name=H264,payload=96 "
             "! rtph264depay "
             "! avdec_h264 "
             "! videoconvert "
-            "! appsink sync=false";
+            "! appsink sync=true";
 
         video_open_thread = std::thread([this, gst_pipeline]() {
             bool ok = cap.open(gst_pipeline, cv::CAP_GSTREAMER);
@@ -248,6 +262,7 @@ private:
                     int width  = first_frame.cols;
                     int height = first_frame.rows;
                     double fps = 30.0;
+                    std::cout << width << "x" << height << std::endl;
 
                     auto now = std::chrono::system_clock::now();
                     std::time_t t = std::chrono::system_clock::to_time_t(now);
@@ -287,28 +302,75 @@ private:
         });
     }
 
+    void init_yolo()
+    {
+        yolo_net = cv::dnn::readNet("/home/greisersem/Desktop/omegabot-controller/yolov8n.onnx");
+        yolo_net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
+        yolo_net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
+    }
 
-    void update_frame() {
-        if (!video_ready.load())
-            return;
-
-        if (!cap.isOpened())
+   void update_frame() {
+        if (!video_ready.load() || !cap.isOpened())
             return;
 
         cv::Mat frame;
         cap >> frame;
-
         if (frame.empty())
             return;
 
-        if (recording && video_writer.isOpened())
-            video_writer.write(frame); 
+        frame_count++;
+        cv::Mat yolo_frame = frame.clone();
 
+        cv::Mat blob = cv::dnn::blobFromImage(yolo_frame, 1.0 / 255.0, cv::Size(640, 640), cv::Scalar(), true);
+        yolo_net.setInput(blob);
+        
+        std::vector<cv::Mat> out;
+        yolo_net.forward(out);
+        cv::Mat output = out[0];
+
+        std::vector<cv::Rect> boxes;
+        std::vector<float> confidences;
+        float conf = 0.4;
+
+        for (int i = 0; i < output.size[2]; i++) {
+            if (output.at<float>(0, 4, i) < conf) {
+                continue;
+            } else {
+                float cx = output.at<float>(0, 0, i);
+                float cy = output.at<float>(0, 1, i);
+                float w = output.at<float>(0, 2, i);
+                float h = output.at<float>(0, 3, i);
+
+                float x = cx - w / 2;
+                float y = cy - h / 2;
+                boxes.push_back(cv::Rect(x, y, w, h));
+                confidences.push_back(output.at<float>(0, 4, i));
+            }
+        }
+
+        std::vector<int> indices;
+        cv::dnn::NMSBoxes(boxes, confidences, 0.4, 0.5, indices);
+
+        for (int idx : indices) {
+            cv::Rect box = boxes[idx];
+
+            cv::rectangle(frame, box, cv::Scalar(0, 255, 0));
+            cv::putText(
+                frame,
+                "person", 
+                cv::Point(box.x, box.y),
+                cv::FONT_HERSHEY_COMPLEX,
+                0.5, 
+                cv::Scalar(0, 0, 0),
+                1
+            );
+        }
+        
         QImage img(frame.data,
-                   frame.cols,
-                   frame.rows,
-                   frame.step,
-                   QImage::Format_BGR888);
+                frame.cols,
+                frame.rows,
+                frame.step,
+                QImage::Format_BGR888);
 
         video_label->setPixmap(
             QPixmap::fromImage(img).scaled(
@@ -317,6 +379,9 @@ private:
                 Qt::SmoothTransformation
             )
         );
+
+        if (recording && video_writer.isOpened())
+            video_writer.write(frame);
     }
 
 
