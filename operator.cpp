@@ -243,11 +243,12 @@ private:
 
     void start_video_open_thread() {
         const std::string gst_pipeline =
-            "udpsrc port=" + std::to_string(VIDEO_PORT) + " caps=application/x-rtp,media=video,encoding-name=H264,payload=96 "
-            "! rtph264depay "
-            "! avdec_h264 "
-            "! videoconvert "
-            "! appsink sync=true";
+            "udpsrc port=" + std::to_string(VIDEO_PORT) + " caps=application/x-rtp,media=video,encoding-name=H264,payload=96 ! "
+            "rtph264depay ! "
+            "h264parse ! "
+            "avdec_h264 ! "
+            "videoconvert ! "
+            "appsink sync=false max-buffers=2 drop=true";
 
         video_open_thread = std::thread([this, gst_pipeline]() {
             bool ok = cap.open(gst_pipeline, cv::CAP_GSTREAMER);
@@ -362,7 +363,7 @@ private:
                 cv::FONT_HERSHEY_COMPLEX,
                 0.5, 
                 cv::Scalar(0, 0, 0),
-                1
+                2
             );
         }
         
