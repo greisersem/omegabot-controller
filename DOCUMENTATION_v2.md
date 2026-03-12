@@ -208,6 +208,36 @@ int main(int argc, char* argv[]) {
 | **Приём логов** | `receive_logs()` | Слушает UDP порт 12347, выводит в QTextEdit и пишет в файл | Флаг `running_logs = false` |
 | **Открытие видео** | `video_open_thread` | Асинхронно подключается к GStreamer-пайплайну | Завершается после подключения (или ошибки) |
 
+```text
+                                      operator.cpp (ПК оператора)
+┌────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                      Main thread (Qt)                                          │
+│  app.exec()                                                                                    │
+│  ├─ keyPress/keyRelease -> current_command (atomic)                                            │
+│  ├─ QTimer command_timer (20 ms) -> send_command(cmd) -> UDP 12345 (команды на Raspberry Pi)   │
+│  ├─ QTimer video_timer   (33 ms) -> update_frame() -> YOLO -> QLabel + video_writer            │
+│  └─ получает логи в GUI через QMetaObject::invokeMethod(..., Qt::QueuedConnection)             │
+└────────────────────────────────────────────────────────────────────────────────────────────────┘
+                 ▲                                                           ▲
+                 │ queued update                                             │ shared atomic flags
+                 │                                                           │ (running/running_logs)
+┌──────────────────────────────────────────────┐          ┌───────────────────────────────────────┐
+│        Log thread: receive_logs()            │          │   Heartbeat thread: send_heartbeat()  │
+│  UDP bind 12347 (non-blocking)               │          │  UDP send "1" -> порт 12348           │
+│  while (running_logs):                       │          │  while (running): sleep 2s            │
+│    recvfrom -> write_log_to_file()           │          └───────────────────────────────────────┘
+│    -> post append() в Qt event loop          │
+└──────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────┐
+│  Video open thread: start_video_open_thread()│
+│  cap.open(GStreamer pipeline)                │
+│  чтение 1-го кадра -> старт VideoWriter      │
+│  queued update статуса QLabel                │
+│  (после этого thread завершается)            │
+└──────────────────────────────────────────────┘
+```
+
 Главный поток Qt содержит два таймера:
 
 - `video_timer` — каждые **33 мс** (~30 FPS) вызывает `update_frame()`: читает кадр, прогоняет через YOLO, рисует рамки, отображает в GUI, записывает в файл.
@@ -351,6 +381,29 @@ cv::dnn::NMSBoxes(boxes, confidences, 0.4, 0.5, indices);
 
 Модель YOLOv8n обучена на датасете COCO и распознаёт **80 классов** объектов (человек, автомобиль, собака, стул и т.д.). Полный список классов определён в массиве `classNames`.
 
+### Как поменять детектируемый YOLO-класс
+
+Сейчас в `operator.cpp` подпись на рамке зашита строкой `"person"` (вызов `cv::putText(...)`), поэтому на экране всегда пишется именно этот класс. Если вы хотите, например, выделять только машины (`car`) или только людей (`person`), есть два шага:
+
+1. В постобработке получить `class_id` детекции (индекс максимальной вероятности среди классов).
+2. Добавить фильтр по нужному классу, например:
+   - `target_class = 0` для `person`
+   - `target_class = 2` для `car`
+   - `target_class = 16` для `dog`
+
+После этого в `cv::putText(...)` лучше выводить `classNames[class_id]`, чтобы подпись соответствовала реальному классу, а не была фиксированной.
+
+Пример логики:
+
+```cpp
+const int target_class = 2; // car
+// ... найти class_id для текущей детекции
+if (class_id != target_class) continue;
+cv::putText(frame, classNames[class_id], ...);
+```
+
+Если фильтр не нужен (нужно показывать все классы), просто уберите проверку `class_id != target_class`, и тогда будут отображаться все найденные объекты с корректными подписями из `classNames`.
+
 ### Приём и сохранение логов
 
 Функция `receive_logs()` работает в отдельном потоке и делает следующее:
@@ -442,6 +495,33 @@ int uart = serOpen("/dev/ttyUSB0", 115200, 0);
 | **Логи** | `send_logs()` | Чтение UART -> пересылка текста по UDP оператору |
 | **Видео** | `video_stream_sender()` | Захват камеры -> кодирование H.264 -> отправка RTP/UDP |
 | **Heartbeat** | `monitor_heartbeat()` | Приём heartbeat от оператора, детекция потери связи |
+
+```text
+                                     raspberry.cpp (Raspberry Pi)
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                    Main thread (main loop)                                       │
+│  UDP socket :12345 (non-blocking) + UART /dev/ttyUSB0                                            │
+│                                                                                                  │
+│  while (true):                                                                                   │
+│    if connection_lost:                                                                           │
+│      send once 'o' -> UART (серийная команда Arduino о потере связи)                             │
+│      wait 100 ms, continue                                                                       │
+│    if connection_restored: reset flags, continue                                                 │
+│    recvfrom(:12345) -> serWriteByte(uart, cmd)                                                   │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+              ▲                                          ▲                                 ▲
+              │ writes flags                             │ independent                     │ independent
+              │ (connection_lost/restored)               │                                 │
+┌──────────────────────────────────┐   ┌────────────────────────────────────┐   ┌──────────────────────────────────┐
+│ Heartbeat thread                 │   │ Log thread: send_logs()            │   │ Video thread                     │
+│ monitor_heartbeat()              │   │ while (logs_running):              │   │ video_stream_sender()            │
+│ UDP bind :12348                  │   │   serRead(uart)                    │   │ GStreamer pipeline:              │
+│ recv '1' -> update timer         │   │   if bytes>0 -> UDP send :12347    │   │ /dev/video0 -> x264 -> RTP/UDP   │
+│ timeout 30s -> connection_lost   │   │   sleep 100 ms                     │   │ -> оператор :12346               │
+│ first packet after timeout       │   └────────────────────────────────────┘   └──────────────────────────────────┘
+│ -> connection_restored           │
+└──────────────────────────────────┘
+```
 
 ### Главный цикл: приём команд и реакция на потерю связи
 
