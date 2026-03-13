@@ -1,4 +1,4 @@
-# OmegaBot Controller — Полная документация проекта
+# OmegaBot Controller
 
 ## Содержание
 
